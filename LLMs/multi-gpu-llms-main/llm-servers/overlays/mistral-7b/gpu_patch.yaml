@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm1
+spec:
+  template:
+    spec:
+      containers:
+        - name: server
+          resources:
+            limits:
+              nvidia.com/gpu: "2"
+              cpu: "8"
+              memory: 32Gi
