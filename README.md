@@ -1,4 +1,4 @@
-# rag-architecture-demo
+# Rag Architecture Demo
 
 RAG Architecture and Pipeline Demo
 
