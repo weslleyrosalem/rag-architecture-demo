@@ -1,0 +1,94 @@
+# PIPELINE DEFINITION
+# Name: pdf-to-xml-var
+# Inputs:
+#    file_identifier: str [Default: 'auto.pdf']
+components:
+  comp-run-a-file:
+    executorLabel: exec-run-a-file
+    inputDefinitions:
+      parameters:
+        file_identifier:
+          defaultValue: auto.pdf
+          isOptional: true
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-run-a-file:
+      container:
+        args:
+        - 'file_identifier="$0"
+          mkdir -p ./jupyter-work-dir && cd ./jupyter-work-dir &&
+          echo "Downloading bootstrapper.py" &&
+          curl --fail -H "Cache-Control: no-cache" -L file:///opt/app-root/bin/utils/bootstrapper.py --output bootstrapper.py &&
+          echo "Downloading requirements-elyra.txt" &&
+          curl --fail -H "Cache-Control: no-cache" -L file:///opt/app-root/bin/utils/requirements-elyra.txt --output requirements-elyra.txt &&
+          python3 -m pip install packaging && python3 -m pip freeze > requirements-current.txt &&
+          python3 bootstrapper.py --pipeline-name "pdf-to-xml-var" --cos-endpoint "https://minio-api-safra-ai.apps.rosa-6dgnl.ver6.p1.openshiftapps.com" --cos-bucket "irpf-pipelines" --cos-directory "pdf-to-xml-var-0803015001" --cos-dependencies-archive "pdf-to-xml-var-4a1016ee-12b3-4ece-9661-e7dbfe28c412.tar.gz" --file "pdf-to-xml-var.py" --pipeline-parameters "file_identifier=$file_identifier" --parameter-pass-method "env"'
+        - '{{$.inputs.parameters['file_identifier']}}'
+        command:
+        - sh
+        - -c
+        env:
+        - name: FILE_IDENTIFIER
+          value: '{{$.inputs.parameters['file_identifier']}}'
+        - name: ELYRA_RUNTIME_ENV
+          value: kfp
+        - name: ELYRA_ENABLE_PIPELINE_INFO
+          value: 'True'
+        - name: ELYRA_WRITABLE_CONTAINER_DIR
+          value: /tmp
+        - name: ELYRA_RUN_NAME
+          value: '{{workflow.uid}}'
+        image: quay.io/modh/runtime-images@sha256:0a3c137492e66c5fac89786f90dbbfdfd3eecd8d9c0e4e890aeeb8f558cd731d
+        resources:
+          cpuLimit: 8.0
+          cpuRequest: 2.0
+          memoryLimit: 8.0
+          memoryRequest: 2.0
+pipelineInfo:
+  name: pdf-to-xml-var
+root:
+  dag:
+    tasks:
+      run-a-file:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-run-a-file
+        inputs:
+          parameters:
+            file_identifier:
+              componentInputParameter: file_identifier
+        taskInfo:
+          name: pdf-to-xml-var
+  inputDefinitions:
+    parameters:
+      file_identifier:
+        defaultValue: auto.pdf
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.8.0
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-run-a-file:
+          podMetadata:
+            annotations:
+              elyra/node-file-name: pdf-to-xml-var.py
+              elyra/pipeline-source: pdf-to-xml-var.pipeline
+            labels:
+              elyra/experiment-name: ''
+              elyra/node-name: pdf-to-xml-var
+              elyra/node-type: notebook-script
+              elyra/pipeline-name: pdf-to-xml-var
+              elyra/pipeline-version: ''
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: AWS_ACCESS_KEY_ID
+              secretKey: AWS_ACCESS_KEY_ID
+            - envVar: AWS_SECRET_ACCESS_KEY
+              secretKey: AWS_SECRET_ACCESS_KEY
+            secretName: dashboard-dspa-secret
