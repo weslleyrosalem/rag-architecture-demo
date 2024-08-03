@@ -1,0 +1,10 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: collections
+data:
+  collections.json: |-
+    [
+      {"name":"none","display_name":"None"},
+      {"name":"demo_collection","display_name":"RHOAI 2.6"}
+    ]
