@@ -29,7 +29,7 @@ deploymentSpec:
           sh -c "python3 -m pip install  packaging && python3 -m pip freeze > requirements-current.txt
           && python3 bootstrapper.py --pipeline-name ''pdf-to-xml-var'' --cos-endpoint
           ''https://minio-api-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com''
-          --cos-bucket ''pipelines'' --cos-directory ''pdf-to-xml-var-0804021418''
+          --cos-bucket ''pipelines'' --cos-directory ''pdf-to-xml-var-0804005135''
           --cos-dependencies-archive ''pdf-to-xml-var-1088e083-cdb9-4757-92de-8db6a96794a8.tar.gz''
           --file ''pdf-to-xml-var.py'' --pipeline-parameters ''file_identifier=$file_identifier''
           --parameter-pass-method ''env'' "

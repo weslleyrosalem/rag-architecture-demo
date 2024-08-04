@@ -1,23 +1,34 @@
-from kafka import KafkaConsumer
+import os
+import subprocess
 import json
-import requests
+from kafka import KafkaConsumer
 
-# Configurar o consumer Kafka
+# Configuração do Kafka
+KAFKA_BROKER = 'pdf-upload-kafka-bootstrap.openshift-operators.svc.cluster.local:9092'
+KAFKA_TOPIC = 'pdf-upload'
+
+# Configuração do Elyra pipeline
+PIPELINE_PATH = 'pdf-to-xml-var.pipeline'
+RUNTIME_CONFIG = 'odh_dsp'
+
 consumer = KafkaConsumer(
-    'pdf-upload',
-    bootstrap_servers='pdf-upload-kafka-bootstrap.openshift-operators.svc.cluster.local:9092',
+    KAFKA_TOPIC,
+    bootstrap_servers=[KAFKA_BROKER],
     auto_offset_reset='earliest',
     enable_auto_commit=True,
-    group_id='my-consumer-group',
+    group_id='my-group',
     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
-def process_message(message):
-    file_identifier = message['Key'].split('/')[-1].replace('.pdf', '')
-    payload = {'file_identifier': file_identifier}
-    response = requests.post('http://localhost:8080/execute_pipeline', json=payload)
-    print(response.text)
+def submit_pipeline(file_identifier):
+    os.environ['file_identifier'] = file_identifier
+    result = subprocess.run(['elyra-pipeline', 'submit', PIPELINE_PATH, '--runtime-config', RUNTIME_CONFIG], capture_output=True, text=True)
+    print(result.stdout)
+    print(result.stderr)
 
-# Processar mensagens da fila
 for message in consumer:
-    process_message(message.value)
+    record = message.value
+    file_identifier = record.get('Key').split('/')[-1].split('.')[0]
+    print(f'Received message: {record}')
+    print(f'File Identifier: {file_identifier}')
+    submit_pipeline(file_identifier)

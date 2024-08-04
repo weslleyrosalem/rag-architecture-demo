@@ -9,7 +9,7 @@
       "id": "primary",
       "nodes": [
         {
-          "id": "4a1016ee-12b3-4ece-9661-e7dbfe28c412",
+          "id": "1088e083-cdb9-4757-92de-8db6a96794a8",
           "type": "execution_node",
           "op": "execute-python-node",
           "app_data": {
@@ -20,31 +20,26 @@
               "dependencies": [],
               "include_subdirectories": false,
               "outputs": [],
-              "env_vars": [
-                {
-                  "env_var": "FILE_IDENTIFIER",
-                  "value": "auto.pdf"
-                }
-              ],
+              "env_vars": [],
               "kubernetes_pod_annotations": [],
               "kubernetes_pod_labels": [],
               "kubernetes_secrets": [],
               "kubernetes_shared_mem_size": {},
               "kubernetes_tolerations": [],
               "mounted_volumes": [],
+              "filename": "pdf-to-xml-var.py",
+              "runtime_image": "quay.io/modh/runtime-images@sha256:0a3c137492e66c5fac89786f90dbbfdfd3eecd8d9c0e4e890aeeb8f558cd731d",
               "cpu": 2,
               "memory": 2,
               "cpu_limit": 8,
-              "memory_limit": 8,
-              "filename": "pdf-to-xml-var.py",
-              "runtime_image": "quay.io/modh/runtime-images@sha256:0a3c137492e66c5fac89786f90dbbfdfd3eecd8d9c0e4e890aeeb8f558cd731d"
+              "memory_limit": 8
             },
             "label": "",
             "ui_data": {
               "label": "pdf-to-xml-var.py",
-              "image": "/notebook/safra-ai/jupyter-notebook-wb02/static/elyra/python.svg",
-              "x_pos": 90,
-              "y_pos": 97,
+              "image": "/notebook/safra-ai/jupyter-wb-01/static/elyra/python.svg",
+              "x_pos": 215,
+              "y_pos": 135,
               "description": "Run Python script"
             }
           },
@@ -93,19 +88,19 @@
               "description": "",
               "default_value": {
                 "type": "String",
-                "value": "auto.pdf"
+                "value": ""
               },
-              "required": false
+              "required": true
             }
           ],
           "pipeline_defaults": {
-            "kubernetes_shared_mem_size": {},
-            "mounted_volumes": [],
-            "kubernetes_pod_annotations": [],
-            "kubernetes_pod_labels": [],
             "kubernetes_tolerations": [],
-            "kubernetes_secrets": [],
-            "env_vars": []
+            "kubernetes_pod_annotations": [],
+            "mounted_volumes": [],
+            "kubernetes_pod_labels": [],
+            "kubernetes_shared_mem_size": {},
+            "env_vars": [],
+            "kubernetes_secrets": []
           }
         }
       },
