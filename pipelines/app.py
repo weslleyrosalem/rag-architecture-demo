@@ -1,20 +1,24 @@
 import subprocess
-from flask import Flask, request
-
-subprocess.check_call(['elyra-metadata', 'import', 'runtimes', '--directory', 'runtimes'])
+from flask import Flask, request, jsonify
+import os
 
 app = Flask(__name__)
 
-
-@app.route('/', methods = ['POST'])
+@app.route('/execute_pipeline', methods=['POST'])
 def execute_pipeline():
+    data = request.get_json()
+    file_identifier = data.get('file_identifier')
 
-    with open('./auto.pdf', 'wb') as file:
-        file.write(request.data)
+    if not file_identifier:
+        return jsonify({'error': 'file_identifier is required'}), 400
 
-    subprocess.check_call(['elyra-pipeline', 'submit', 'pdf-to-xml-var.pipeline', '--runtime-config', 'odh_dsp'])
+    # Set the environment variable for the script
+    os.environ['file_identifier'] = file_identifier
 
-    result = 'pipeline_executed!'
-    print(result)
+    # Call the pipeline script
+    result = subprocess.check_call([sys.executable, 'pipeline_script.py'])
 
-    return result
+    return jsonify({'result': 'pipeline_executed'}), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)

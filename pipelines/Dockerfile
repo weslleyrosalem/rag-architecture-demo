@@ -4,7 +4,7 @@ WORKDIR /app
 COPY . /app
 
 RUN chmod 777 /app
-RUN pip install --upgrade elyra Flask
+RUN pip install --upgrade elyra Flask kafka-python
 
 ENV FLASK_APP app.py
 
