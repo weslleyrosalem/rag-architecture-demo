@@ -1,23 +1,61 @@
-from kafka import KafkaConsumer
+import os
 import json
-import requests
+import random
+import string
+from kafka import KafkaConsumer
+from kfp.client import Client
 
-# Configurar o consumer Kafka
+# Configuração do Kafka
+KAFKA_BROKER = 'pdf-upload-kafka-bootstrap.openshift-operators.svc.cluster.local:9092'
+KAFKA_TOPIC = 'pdf-upload'
+
+# Configuração do KFP client
+KFP_HOST = 'https://ds-pipeline-dspa-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com'
+KFP_TOKEN = 'sha256~AdXQ53jjxC4DJyzgjPR32k-V-6YpOnMKXXHj3pmO8NI'
+PIPELINE_FILE = 'rhoai-pdf-to-xml.yaml'
+
+# Inicializa o consumidor Kafka
 consumer = KafkaConsumer(
-    'pdf-upload',
-    bootstrap_servers='pdf-upload-kafka-bootstrap.openshift-operators.svc.cluster.local:9092',
+    KAFKA_TOPIC,
+    bootstrap_servers=[KAFKA_BROKER],
     auto_offset_reset='earliest',
     enable_auto_commit=True,
-    group_id='my-consumer-group',
+    group_id='my-group',
     value_deserializer=lambda x: json.loads(x.decode('utf-8'))
 )
 
-def process_message(message):
-    file_identifier = message['Key'].split('/')[-1].replace('.pdf', '')
-    payload = {'file_identifier': file_identifier}
-    response = requests.post('http://localhost:8080/execute_pipeline', json=payload)
-    print(response.text)
+def generate_random_run_name(base_name):
+    random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    return f"{base_name}-{random_suffix}"
 
-# Processar mensagens da fila
+def submit_pipeline(file_identifier):
+    # Configura os argumentos do pipeline
+    pipeline_arguments = {
+        'file_identifier': file_identifier
+    }
+    # Cria o cliente KFP
+    client = Client(
+        host=KFP_HOST,
+        existing_token=KFP_TOKEN
+    )
+    # Submete o pipeline com os argumentos
+    run_name = generate_random_run_name("rhoai-pdf-to-xml")
+    experiment_name = "rhoai-pdf-to-xml"
+    result = client.create_run_from_pipeline_package(
+        pipeline_file=PIPELINE_FILE,
+        arguments=pipeline_arguments,
+        run_name=run_name,
+        experiment_name=experiment_name
+    )
+    # Saída do resultado
+    print(result)
+
+# Consome mensagens do tópico Kafka
 for message in consumer:
-    process_message(message.value)
+    record = message.value
+    # Extrai o nome do arquivo sem extensão
+    file_identifier = os.path.splitext(record.get('Key').split('/')[-1])[0]
+    print(f'Received message: {record}')
+    print(f'File Identifier: {file_identifier}')
+    # Submete o pipeline com o identificador do arquivo
+    submit_pipeline(file_identifier)

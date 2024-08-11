@@ -1,13 +1,14 @@
 # PIPELINE DEFINITION
-# Name: pdf-to-xml-var
+# Name: rhoai-pdf-to-xml
 # Inputs:
-#    file_identifier: str [Default: '22_95658203015_2023_2024']
+#    file_identifier: str
 components:
   comp-run-a-file:
     executorLabel: exec-run-a-file
     inputDefinitions:
       parameters:
         file_identifier:
+          isOptional: true
           parameterType: STRING
 deploymentSpec:
   executors:
@@ -27,11 +28,11 @@ deploymentSpec:
           --output requirements-elyra.txt"
 
           sh -c "python3 -m pip install  packaging && python3 -m pip freeze > requirements-current.txt
-          && python3 bootstrapper.py --pipeline-name ''pdf-to-xml-var'' --cos-endpoint
+          && python3 bootstrapper.py --pipeline-name ''rhoai-pdf-to-xml'' --cos-endpoint
           ''https://minio-api-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com''
-          --cos-bucket ''pipelines'' --cos-directory ''pdf-to-xml-var-0804021418''
-          --cos-dependencies-archive ''pdf-to-xml-var-1088e083-cdb9-4757-92de-8db6a96794a8.tar.gz''
-          --file ''pdf-to-xml-var.py'' --pipeline-parameters ''file_identifier=$file_identifier''
+          --cos-bucket ''pipelines'' --cos-directory ''rhoai-pdf-to-xml-0807171348''
+          --cos-dependencies-archive ''rhoai-pdf-to-xml-ddbb5772-55ca-45c2-a2be-e0d65026eae3.tar.gz''
+          --file ''rhoai-pdf-to-xml.py'' --pipeline-parameters ''file_identifier=$file_identifier''
           --parameter-pass-method ''env'' "
 
           '
@@ -52,10 +53,9 @@ deploymentSpec:
         resources:
           cpuLimit: 8.0
           cpuRequest: 2.0
-          memoryLimit: 8.0
           memoryRequest: 2.0
 pipelineInfo:
-  name: pdf-to-xml-var
+  name: rhoai-pdf-to-xml
 root:
   dag:
     tasks:
@@ -69,11 +69,10 @@ root:
             file_identifier:
               componentInputParameter: file_identifier
         taskInfo:
-          name: pdf-to-xml-var
+          name: rhoai-pdf-to-xml
   inputDefinitions:
     parameters:
       file_identifier:
-        defaultValue: '22_95658203015_2023_2024'
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
@@ -86,13 +85,13 @@ platforms:
         exec-run-a-file:
           podMetadata:
             annotations:
-              elyra/node-file-name: pdf-to-xml-var.py
-              elyra/pipeline-source: pdf-to-xml-var.pipeline
+              elyra/node-file-name: rhoai-pdf-to-xml.py
+              elyra/pipeline-source: rhoai-pdf-to-xml.pipeline
             labels:
               elyra/experiment-name: ''
-              elyra/node-name: pdf-to-xml-var
+              elyra/node-name: rhoai-pdf-to-xml
               elyra/node-type: notebook-script
-              elyra/pipeline-name: pdf-to-xml-var
+              elyra/pipeline-name: rhoai-pdf-to-xml
               elyra/pipeline-version: ''
           secretAsEnv:
           - keyToEnv:
