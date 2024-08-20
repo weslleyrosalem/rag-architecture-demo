@@ -61,7 +61,7 @@ root:
     tasks:
       run-a-file:
         cachingOptions:
-          enableCache: true
+          enableCache: false
         componentRef:
           name: comp-run-a-file
         inputs:

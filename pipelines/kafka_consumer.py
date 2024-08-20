@@ -11,7 +11,7 @@ KAFKA_TOPIC = 'pdf-upload'
 
 # Configuração do KFP client
 KFP_HOST = 'https://ds-pipeline-dspa-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com'
-KFP_TOKEN = 'sha256~...'
+KFP_TOKEN = 'sha256...'
 PIPELINE_FILE = 'rhoai-pdf-to-xml.yaml'
 
 # Inicializa o consumidor Kafka
