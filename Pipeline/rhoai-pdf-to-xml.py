@@ -118,6 +118,9 @@ def extract_contributor_name(text):
         match = re.search(r'Nome do Contribuinte:\s*([A-Z\s]+)\s*CPF:', text, re.IGNORECASE)
         if match:
             return match.group(1).strip()
+        else:
+            match = re.search(r'Nome:\s*([A-Z\s]+)\s*Data de Nascimento:', text, re.IGNORECASE)
+            return match.group(1).strip()
         return None
 
 def split_text(text, max_length=60000):
