@@ -30,8 +30,8 @@ deploymentSpec:
           sh -c "python3 -m pip install  packaging && python3 -m pip freeze > requirements-current.txt
           && python3 bootstrapper.py --pipeline-name ''rhoai-pdf-to-xml'' --cos-endpoint
           ''https://minio-api-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com''
-          --cos-bucket ''pipelines'' --cos-directory ''rhoai-pdf-to-xml-0807171348''
-          --cos-dependencies-archive ''rhoai-pdf-to-xml-ddbb5772-55ca-45c2-a2be-e0d65026eae3.tar.gz''
+          --cos-bucket ''pipelines'' --cos-directory ''rhoai-pdf-to-xml-0913210320''
+          --cos-dependencies-archive ''rhoai-pdf-to-xml-b2c8ebd5-c444-423b-a093-59303ab366e1.tar.gz''
           --file ''rhoai-pdf-to-xml.py'' --pipeline-parameters ''file_identifier=$file_identifier''
           --parameter-pass-method ''env'' "
 
@@ -49,7 +49,7 @@ deploymentSpec:
           value: /tmp
         - name: ELYRA_RUN_NAME
           value: '{{workflow.uid}}'
-        image: quay.io/modh/runtime-images@sha256:0a3c137492e66c5fac89786f90dbbfdfd3eecd8d9c0e4e890aeeb8f558cd731d
+        image: quay.io/modh/runtime-images@sha256:df1adec7e0623afd07fbe2d6fd6f759800d93c136c33a5b322ed347cbbbd70aa
         resources:
           cpuLimit: 8.0
           cpuRequest: 2.0
@@ -61,7 +61,7 @@ root:
     tasks:
       run-a-file:
         cachingOptions:
-          enableCache: false
+          enableCache: true
         componentRef:
           name: comp-run-a-file
         inputs:

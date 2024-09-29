@@ -1,17 +1,6 @@
 import os
 import subprocess
 import sys
-import fitz  # PyMuPDF
-import re
-import openai
-from minio import Minio
-from minio.error import S3Error
-from sentence_transformers import SentenceTransformer
-from langchain_community.vectorstores import Milvus
-from pdf2image import convert_from_path
-import pytesseract
-from PIL import Image
-import io
 
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -24,19 +13,35 @@ dependencies = [
     "langchain_community",
     "minio",
     "pymupdf",
-    "pdf2image",
-    "pytesseract",
+    "google-cloud-vision",
     "Pillow"
 ]
 
 for dep in dependencies:
     install(dep)
 
+from google.cloud import vision
+from google.oauth2 import service_account
+import fitz  # PyMuPDF
+import re
+import openai
+from minio import Minio
+from minio.error import S3Error
+from sentence_transformers import SentenceTransformer
+from langchain_community.vectorstores import Milvus
+#from langchain_milvus import MilvusVectorStore
+from PIL import Image
+import io
+
+
+# Configuração do Google Cloud Vision
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./poc-marvel-4a0ef9962da2.json"
+
 # Configurações do MinIO
-AWS_S3_ENDPOINT = "minio-api-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com"
+AWS_S3_ENDPOINT = "minio-api-xyz-ai.apps.rosa-123.72zm.p1.openshiftapps.com"
 AWS_ACCESS_KEY_ID = ""
 AWS_SECRET_ACCESS_KEY = ""
-AWS_S3_BUCKET = "irpf-2024"
+AWS_S3_BUCKET = ""
 
 # Criação do cliente MinIO
 client = Minio(
@@ -46,8 +51,16 @@ client = Minio(
     secure=True  # Configurado para HTTPS
 )
 
+# Ensure the script receives the file identifier as an environment variable
+file_identifier = os.getenv('file_identifier')
+#file_identifier = "joao"
+if not file_identifier:
+    print("Error: file_identifier environment variable is not set.")
+    sys.exit(1)
+else:
+    print(f"file_identifier: {file_identifier}")
+
 # Baixar o arquivo PDF do MinIO
-file_identifier = "2024-bernardo"
 object_name = f"{file_identifier}.pdf"
 file_path = f"./{file_identifier}.pdf"
 output_pdf_path = f"./{file_identifier}_no_watermark.pdf"
@@ -93,31 +106,54 @@ def extract_text_from_pdf(pdf_path):
         text += page.get_text()
     return text
 
+# Função para realizar OCR no PDF usando Google Cloud Vision
+def ocr_extract_text_from_pdf_gcv(pdf_path):
+    try:
+        # Inicializar o cliente do Google Cloud Vision
+        client = vision.ImageAnnotatorClient()
+
+        # Abre o PDF com PyMuPDF
+        pdf_document = fitz.open(pdf_path)
+        text = ""
+
+        for i in range(len(pdf_document)):
+            # Converte a página do PDF em uma imagem
+            page = pdf_document[i]
+            pix = page.get_pixmap()
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            # Converte a imagem para bytes
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='PNG')
+            img_byte_arr = img_byte_arr.getvalue()
+
+            # Converte para o formato de imagem utilizado pelo Google Vision
+            image = vision.Image(content=img_byte_arr)
+
+            # Chama a API para realizar OCR
+            response = client.text_detection(image=image)
+            annotations = response.text_annotations
+
+            if annotations:
+                page_text = annotations[0].description
+                text += page_text + "\n"
+                print(f"Texto extraído da página {i + 1}: {page_text[:100]}...")  # Imprime os primeiros 100 caracteres
+
+            if response.error.message:
+                raise Exception(f'{response.error.message}')
+
+        return text
+    except Exception as e:
+        print(f"Erro ao tentar realizar OCR no arquivo {pdf_path}: {e}")
+        return ""
+
 # Função para tentar extrair texto e fallback para OCR se necessário
 def extract_text_with_fallback(pdf_path):
     text = extract_text_from_pdf(pdf_path)
     if not text.strip():
         print("Texto não encontrado com fitz. Iniciando OCR...")
-        text = ocr_extract_text_from_pdf(pdf_path)
+        text = ocr_extract_text_from_pdf_gcv(pdf_path)
     return text
-
-# Função para realizar OCR no PDF
-def ocr_extract_text_from_pdf(pdf_path):
-    try:
-        # Converte cada página do PDF em uma imagem
-        images = convert_from_path(pdf_path)
-        text = ""
-        
-        for i, image in enumerate(images):
-            # Extrai texto da imagem usando OCR
-            page_text = pytesseract.image_to_string(image, lang='por')
-            text += page_text + "\n"
-            print(f"Texto extraído da página {i + 1}: {page_text[:100]}...")  # Imprime os primeiros 100 caracteres
-        
-        return text
-    except Exception as e:
-        print(f"Erro ao tentar realizar OCR no arquivo {pdf_path}: {e}")
-        return ""
 
 # Função para extrair nome do contribuinte
 def extract_contributor_name(text):
@@ -145,7 +181,7 @@ MILVUS_PASSWORD = ""
 MILVUS_COLLECTION = "safra_dir"
 
 # Configurações do OpenAI
-OPENAI_API_KEY = "sk-"
+OPENAI_API_KEY = ""
 openai.api_key = OPENAI_API_KEY
 
 # Inicialização do modelo de embedding
@@ -232,7 +268,7 @@ store = Milvus(
     collection_name=MILVUS_COLLECTION,
     metadata_field="metadata",
     text_field="page_content",
-    drop_old=True,
+    drop_old=False,
     auto_id=True
 )
 
@@ -255,7 +291,7 @@ print(f"Contributor name: {contributor_name}")
 
 # Função para realizar a consulta no Milvus e gerar o XML
 def query_information(query, contributor_name):
-    documents = store.search(query=query, k=4, search_type="similarity")
+    documents = store.search(query=query, k=1, search_type="similarity")
 
     context_parts = []
     for doc in documents:
@@ -269,54 +305,247 @@ def query_information(query, contributor_name):
     context_combined = "\n".join(context_parts)
 
     response = openai.ChatCompletion.create(
-        model="gpt-4o",
+        model="gpt-4o-2024-08-06",
         temperature=0.3,  # Configuração para tornar a resposta mais determinística
         messages=[
-            {"role": "system", "content": "Você é um assistente financeiro avançado, experiente com profundo conhecimento em declaração de imposto de renda. Seu único objetivo é extrair TODAS as informações do contexto fornecido e gerar respostas no formato XML. NUNCA interrompa uma resposta devido ao seu tamanho. Crie o XML com TODAS as informações pertinentes à sessão de bens e direitos, respeitando TODOS seus atributos, todos detalhes e todas informações."},
-            {"role": "user", "content": f"{context_combined}\n\n Quais são todos os bens e direitos suas informações e seus detalhes, declarados por {contributor_name}? O resultado deve ser apresentado exclusivamente em XML com TODA as características e detalhes de cada um dos bens, conforme exemplos abaixo:\n\n\
+            {
+                "role": "system",
+                "content": "Você é um assistente financeiro avançado, experiente com profundo conhecimento em declaração de imposto de renda. Seu único objetivo é extrair informações do contexto fornecido e gerar respostas no formato XML. NUNCA interrompa uma resposta devido ao seu tamanho. Crie o XML com TODAS as informações pertinentes à sessão de bens e direitos, respeitando TODOS seus atributos e todos seus detalhes."
+            },
+            {
+                "role": "user",
+                "content": f"{context_combined}\n\nQuais são todos os bens e direitos, suas informações e seus detalhes, declarados por {contributor_name}? O resultado deve ser apresentado exclusivamente em XML com TODAS as características e detalhes de cada um dos bens, conforme exemplos abaixo:\n\n\
 <?xml version=\"1.0\" ?>\n\
 <SECTION Name=\"DECLARACAO DE BENS E DIREITOS\">\n\
     <TABLE>\n\
         <ROW No=\"1\">\n\
             <Field Name=\"GRUPO\" Value=\"01\"/>\n\
-            <Field Name=\"CODIGO\" Value=\"16\"/>\n\
-            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. 105 - BRASIL Bem ou direito pertencente ao: Titular CPF: 392.336.134-37 CNPJ: 23.353.453/5353-43 Negociados em Bolsa: Sim Código de Negociação: 45353543\"/>\n\
-            <Field Name=\"SITUACAOANTERIOR\" Value=\"24.234,00\"/>\n\
-            <Field Name=\"SITUACAOATUAL\" Value=\"24.234,00\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"01\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"23.445,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"342.342,00\"/>\n\
+            <Field Name=\"InscricaoMunicipal(IPTU)\" Value=\"23423424\"/>\n\
+            <Field Name=\"Logradouro\" Value=\"RUA QUALQUER\"/>\n\
+            <Field Name=\"Numero\" Value=\"89\"/>\n\
+            <Field Name=\"Complemento\" Value=\"COMPLEM 2\"/>\n\
+            <Field Name=\"Bairro\" Value=\"BRASILIA\"/>\n\
+            <Field Name=\"Municipio\" Value=\"BRASÍLIA\"/>\n\
+            <Field Name=\"UF\" Value=\"DF\"/>\n\
+            <Field Name=\"CEP\" Value=\"1321587\"/>\n\
+            <Field Name=\"AreaTotal\" Value=\"345,0 m²\"/>\n\
+            <Field Name=\"DatadeAquisicao\" Value=\"12/12/1993\"/>\n\
+            <Field Name=\"RegistradonoCartorio\" Value=\"Sim\"/>\n\
+            <Field Name=\"NomeCartorio\" Value=\"CARTORIO DE SÇNJJKLCDF ASLK SAKÇK SAÇKLJ SAÇLKS\"/>\n\
+            <Field Name=\"Matricula\" Value=\"2344234\"/>\n\
         </ROW>\n\
         <ROW No=\"2\">\n\
-            <Field Name=\"GRUPO\" Value=\"02\"/>\n\
+            <Field Name=\"GRUPO\" Value=\"01\"/>\n\
             <Field Name=\"CODIGO\" Value=\"14\"/>\n\
-            <Field Name=\"DISCRIMINACAO\" Value=\" DONEC ALIQUA 105 - BRASIL CIB (Nirf): 12321321 Logradouro: RUA DA CURVA Nº: 2342 Comp.: COMPLEMENTO 22320 KL-K[ Bairro: DISTRIVOT Município: ATALAIA DO NORTE UF: AM CEP: 23442-222 Área Total: 23.423,0 m² Data de Aquisição: 13/11/1987 Registrado no Cartório: Sim Nome Cartório: 4DFDFÇJKLNDFÇJO GKSJ Matrícula: 3423434 S-LJK\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"ETIAM EGET ORNARE DOLOR. UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
             <Field Name=\"SITUACAOANTERIOR\" Value=\"34.534,00\"/>\n\
             <Field Name=\"SITUACAOATUAL\" Value=\"45.353,00\"/>\n\
+            <Field Name=\"Logradouro\" Value=\"RUA DA CURVA\"/>\n\
+            <Field Name=\"Numero\" Value=\"2342\"/>\n\
+            <Field Name=\"Complemento\" Value=\"COMPLEMENTO 22320 KL-KI\"/>\n\
+            <Field Name=\"Bairro\" Value=\"DISTRIVOT\"/>\n\
+            <Field Name=\"Municipio\" Value=\"ATALAIA DO NORTE\"/>\n\
+            <Field Name=\"UF\" Value=\"AM\"/>\n\
+            <Field Name=\"CEP\" Value=\"23442-222\"/>\n\
+            <Field Name=\"AreaTotal\" Value=\"23.423,0 m²\"/>\n\
+            <Field Name=\"DatadeAquisicao\" Value=\"13/11/1987\"/>\n\
+            <Field Name=\"RegistradonoCartorio\" Value=\"Sim\"/>\n\
+            <Field Name=\"NomeCartorio\" Value=\"4DFDFCJKLNDFÇJO ÇKSJ S-LJK\"/>\n\
+            <Field Name=\"Matricula\" Value=\"3423434\"/>\n\
         </ROW>\n\
         <ROW No=\"3\">\n\
+            <Field Name=\"GRUPO\" Value=\"01\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"16\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"2.233.223,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"2.233.223,00\"/>\n\
+            <Field Name=\"CEV/CNO\" Value=\"21.313.43133/12\"/>\n\
+            <Field Name=\"Logradouro\" Value=\"LOGRADOURO 32323 SDDSÇKLNM SA-CL SDS\"/>\n\
+            <Field Name=\"Numero\" Value=\"212\"/>\n\
+            <Field Name=\"Complemento\" Value=\"COMPLEMENTO 3223DSDDS-SDL\"/>\n\
+            <Field Name=\"Bairro\" Value=\"SDFSDS\"/>\n\
+            <Field Name=\"Municipio\" Value=\"ALTO BOA VISTA\"/>\n\
+            <Field Name=\"UF\" Value=\"MT\"/>\n\
+            <Field Name=\"CEP\" Value=\"23432-424\"/>\n\
+            <Field Name=\"AreaTotal\" Value=\"34.234,0 ha\"/>\n\
+            <Field Name=\"DatadeAquisicao\" Value=\"\"/>\n\
+        </ROW>\n\
+        <ROW No=\"4\">\n\
+            <Field Name=\"GRUPO\" Value=\"01\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"17\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"ETIAM EGET ORNARE DOLOR. UT QUIS ALIQUAM LEO.\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"21.343,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"21.343,00\"/>\n\
+            <Field Name=\"Logradouro\" Value=\"LOGRADOUR W-CMO-SC-DO-23-90\"/>\n\
+            <Field Name=\"Complemento\" Value=\"S-M-KMSDASDFKÇMSDKS\"/>\n\
+            <Field Name=\"Bairro\" Value=\"CWFJNJ-SNMF\"/>\n\
+            <Field Name=\"Municipio\" Value=\"ATALAIA DO NORTE\"/>\n\
+            <Field Name=\"UF\" Value=\"AM\"/>\n\
+            <Field Name=\"CEP\" Value=\"23424-242\"/>\n\
+            <Field Name=\"AreaTotal\" Value=\"234.234,0 m²\"/>\n\
+            <Field Name=\"DatadeAquisicao\" Value=\"\"/>\n\
+        </ROW>\n\
+        <ROW No=\"5\">\n\
+            <Field Name=\"GRUPO\" Value=\"02\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"01\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"234.223,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"234.223,00\"/>\n\
+            <Field Name=\"RENAVAM\" Value=\"21332132132\"/>\n\
+        </ROW>\n\
+        <ROW No=\"6\">\n\
             <Field Name=\"GRUPO\" Value=\"02\"/>\n\
             <Field Name=\"CODIGO\" Value=\"02\"/>\n\
-            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA 105 - BRASIL Registro de Aeronave: 242342343423432\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
             <Field Name=\"SITUACAOANTERIOR\" Value=\"234.423,00\"/>\n\
             <Field Name=\"SITUACAOATUAL\" Value=\"3.424.323,00\"/>\n\
             <Field Name=\"RegistrodeAeronave\" Value=\"242342343423432\"/>\n\
         </ROW>\n\
-        <ROW No=\"4\">\n\
-            <Field Name=\"GRUPO\" Value=\"01\"/>\n\
+        <ROW No=\"7\">\n\
+            <Field Name=\"GRUPO\" Value=\"02\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"03\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQU\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"23.424,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"23.424,00\"/>\n\
+            <Field Name=\"RegistrodeEmbarcacao\" Value=\"WESSFG234DCD\"/>\n\
+        </ROW>\n\
+        <ROW No=\"8\">\n\
+            <Field Name=\"GRUPO\" Value=\"02\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"04\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"45.635,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"345.234,00\"/>\n\
+        </ROW>\n\
+        <ROW No=\"9\">\n\
+            <Field Name=\"GRUPO\" Value=\"02\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"99\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC A\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"345.234,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"345.234,00\"/>\n\
+        </ROW>\n\
+        <ROW No=\"10\">\n\
+            <Field Name=\"GRUPO\" Value=\"03\"/>\n\
             <Field Name=\"CODIGO\" Value=\"01\"/>\n\
-            <Field Name=\"DISCRIMINACAO\" Value=\"DONEC ALIQUA 105 - BRASIL Inscrição Municipal (IPTU): 23423424 Logradouro: RUA QUALQUER Nº: 89 Comp.: COMPLEM 2 Bairro: BRASILIA Município: BRASÍLIA UF: DF CEP: 1321587 Área Total: 345,0 m² Data de Aquisição: 12/12/1993 Registrado no Cartório: Sim Nome Cartório: CARTORIO DE SÇQNJJKLÇDF Matrícula: 2344234 ASLK SAKÇK SAÇKLJ SAÇLKS\"/>\n\
-            <Field Name=\"SITUACAOANTERIOR\" Value=\"23.445,00\"/>\n\
-            <Field Name=\"SITUACAOATUAL\" Value=\"342.342,00\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"ETIAM EGET ORNARE DOLOR. UT QUIS ALIQUAM LEO.\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"23.440,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"3.445.323,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CPF\" Value=\"392.336.134-37\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"23.353.453/5353-43\"/>\n\
+            <Field Name=\"NegociadosemBolsa\" Value=\"Sim\"/>\n\
+            <Field Name=\"CodigoNegociacao\" Value=\"45353543\"/>\n\
+        </ROW>\n\
+        <ROW No=\"11\">\n\
+            <Field Name=\"GRUPO\" Value=\"03\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"01\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\" IN SED LECTUS ODIO. ETIAM EGET ORNARE DOLOR. UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"23.454,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"234.243,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Dependente\"/>\n\
+            <Field Name=\"CPF\" Value=\"233.352.471-59\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"34.555.435/3534-53\"/>\n\
+            <Field Name=\"NegociadosemBolsa\" Value=\"Não\"/>\n\
+        </ROW>\n\
+        <ROW No=\"12\">\n\
+            <Field Name=\"GRUPO\" Value=\"03\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"02\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"5.450,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"230,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CPF\" Value=\"392.336.134-37\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"23424234\"/>\n\
+        </ROW>\n\
+        <ROW No=\"13\">\n\
+            <Field Name=\"GRUPO\" Value=\"03\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"99\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALIQUA\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"234.234,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"2.342.340,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Dependente\"/>\n\
+            <Field Name=\"CPF\" Value=\"822.764.521-61\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"23.423.423/4324-23\"/>\n\
+        </ROW>\n\
+        <ROW No=\"14\">\n\
+            <Field Name=\"GRUPO\" Value=\"04\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"01\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UT QUIS ALIQUAM LEO. DONEC ALI\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"213.123,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"213,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"4555453454355\"/>\n\
+            <Field Name=\"Banco\" Value=\"117\"/>\n\
+            <Field Name=\"Agencia\" Value=\"1233\"/>\n\
+            <Field Name=\"Conta\" Value=\"123313-2\"/>\n\
+        </ROW>\n\
+        <ROW No=\"15\">\n\
+            <Field Name=\"GRUPO\" Value=\"04\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"02\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"LOREM IPSUM VEHICULA MATTIS SOCIOSQU UT ERAT NEQUE FUSCE\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"456.534,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"8.989,0\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CPF\" Value=\"416.228.090-84\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"45.746.413/0001-58\"/>\n\
+        </ROW>\n\
+        <ROW No=\"16\">\n\
+            <Field Name=\"GRUPO\" Value=\"04\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"05\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"LOREM IPSUM PURUS PHARETRA RUTRUM\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"456.834,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"0,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CPF\" Value=\"416.228.090-84\"/>\n\
+        </ROW>\n\
+        <ROW No=\"17\">\n\
+            <Field Name=\"GRUPO\" Value=\"05\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"01\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"LOREM IPSUM DUIS NISI EGESTAS ID RUTRUM ALIQUAM\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"2.345.234,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"6.457.630,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CPF\" Value=\"416.228.090-84\"/>\n\
+        </ROW>\n\
+        <ROW No=\"18\">\n\
+            <Field Name=\"GRUPO\" Value=\"06\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"01\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"UIDEM QUIBUSDAM AT CONSEQUATUR OPTIO UT QUIA IPSUM.\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"34.543,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"0,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CNPJ\" Value=\"22.478.150/0001-48\"/>\n\
+            <Field Name=\"Banco\" Value=\"237\"/>\n\
+            <Field Name=\"Agência\" Value=\"3453\"/>\n\
+            <Field Name=\"Conta\" Value=\"345-3\"/>\n\
+            <Field Name=\"Titular CPF\" Value=\"906.395.600-24\"/>\n\
+        </ROW>\n\
+        <ROW No=\"19\">\n\
+            <Field Name=\"GRUPO\" Value=\"06\"/>\n\
+            <Field Name=\"CODIGO\" Value=\"10\"/>\n\
+            <Field Name=\"DISCRIMINACAO\" Value=\"LOREM IPSUM ID NAM DUIS PORTTITOR CURABITUR VITAE MALESUADA.\"/>\n\
+            <Field Name=\"SITUACAOANTERIOR\" Value=\"234,00\"/>\n\
+            <Field Name=\"SITUACAOATUAL\" Value=\"0,00\"/>\n\
+            <Field Name=\"Bemoudireitopertencenteao\" Value=\"Titular\"/>\n\
+            <Field Name=\"CPF\" Value=\"416.228.090-84\"/>\n\
         </ROW>\n\
     </TABLE>\n\
-</SECTION>"}
+</SECTION>"
+            }
         ]
     )
+
     return response['choices'][0]['message']['content']
+
 
 # Função principal
 def main():
     if contributor_name:
         text = extract_text_with_fallback(output_pdf_path)
-        query = f"Quais são todos os bens e direitos suas informações e seus detalhes, declarados por {contributor_name} ?"
+        query = f"Quais são todos os bens e direitos suas informações, seus atributos e detalhes, declarados por {contributor_name}?"
         result = query_information(query, contributor_name)
 
         # Remover formatação de código se existir

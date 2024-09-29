@@ -12,17 +12,17 @@ dependencies = [
 
 for dep in dependencies:
     install(dep)
-    
+
 import fitz  # PyMuPDF
 import re
 from minio import Minio
 from minio.error import S3Error
-    
+
 
 #Remove Watermark
 def remove_watermark_advanced(pdf_path, output_path):
     doc = fitz.open(pdf_path)
-    
+
     for page in doc:
         # Iterate over all images in the page
         image_list = page.get_images(full=True)
@@ -30,7 +30,7 @@ def remove_watermark_advanced(pdf_path, output_path):
             xref = img[0]
             # Remove the image (possible watermark)
             page.delete_image(xref)
-        
+
         # Iterate over all text annotations (potential text-based watermarks)
         annots = page.annots()
         if annots:

@@ -11,7 +11,7 @@ KAFKA_TOPIC = 'pdf-upload'
 
 # Configuração do KFP client
 KFP_HOST = 'https://ds-pipeline-dspa-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com'
-KFP_TOKEN = 'sha256...'
+KFP_TOKEN = 'sha256~Q42dahaoIuTohNpTpPkd_HKX9gaz9lE0AWSO8Nlbq8k'
 PIPELINE_FILE = 'rhoai-pdf-to-xml.yaml'
 
 # Inicializa o consumidor Kafka
@@ -39,8 +39,8 @@ def submit_pipeline(file_identifier):
         existing_token=KFP_TOKEN
     )
     # Submete o pipeline com os argumentos
-    run_name = generate_random_run_name("rhoai-pdf-to-xml")
-    experiment_name = "rhoai-pdf-to-xml"
+    run_name = generate_random_run_name("pdf-to-xml-safra-irpf")
+    experiment_name = "pdf-to-xml-safra-irpf"
     result = client.create_run_from_pipeline_package(
         pipeline_file=PIPELINE_FILE,
         arguments=pipeline_arguments,
