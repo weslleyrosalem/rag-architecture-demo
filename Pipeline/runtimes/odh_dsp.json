@@ -1,0 +1,21 @@
+{
+    "name": "odh_dsp",
+    "display_name": "Data Science Pipeline",
+    "metadata": {
+        "tags": [],
+        "display_name": "Data Science Pipeline",
+        "engine": "Argo",
+        "auth_type": "KUBERNETES_SERVICE_ACCOUNT_TOKEN",
+        "api_endpoint": "https://ds-pipeline-dspa-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com",
+        "public_api_endpoint": "https://rhods-dashboard-redhat-ods-applications.apps.rosa-5hxrw.72zm.p1.openshiftapps.com/experiments/safra-ai/",
+        "cos_auth_type": "KUBERNETES_SECRET",
+        "cos_secret": "dashboard-dspa-secret",
+        "cos_endpoint": "https://minio-api-safra-ai.apps.rosa-5hxrw.72zm.p1.openshiftapps.com",
+        "cos_bucket": "pipelines",
+        "cos_username": "minio",
+        "cos_password": "minio123",
+        "runtime_type": "KUBEFLOW_PIPELINES"
+    },
+    "schema_name": "kfp",
+    "resource": "/opt/app-root/src/.local/share/jupyter/metadata/runtimes/odh_dsp.json"
+}
