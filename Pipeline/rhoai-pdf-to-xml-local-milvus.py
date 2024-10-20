@@ -1,12 +1,11 @@
 import os
 import subprocess
 import sys
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-# Install necessary dependencies
+# Instalação das dependências necessárias
 dependencies = [
     "sentence-transformers",
     "pymilvus",
@@ -14,65 +13,54 @@ dependencies = [
     "langchain_community",
     "minio",
     "pymupdf",
-    "Pillow",
-    "pytesseract",
-    "pandas",
-    "langchain-milvus",
-    "opencv-python",
-    "pdf2image"  # Added pdf2image
+    "google-cloud-vision",
+    "Pillow"
 ]
 
 for dep in dependencies:
     install(dep)
 
+from google.cloud import vision
+from google.oauth2 import service_account
 import fitz  # PyMuPDF
 import re
 import openai
 from minio import Minio
 from minio.error import S3Error
 from sentence_transformers import SentenceTransformer
-#from langchain_milvus import Milvus
 from langchain_community.vectorstores import Milvus
-import pytesseract
-from pytesseract import Output
-import pandas as pd
-import logging
-import urllib3
-from pdf2image import convert_from_path  # For converting PDFs to images
+#from langchain_milvus import MilvusVectorStore
+from PIL import Image
+import io
 
-# MinIO configuration
+
+# Configuração do Google Cloud Vision
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./poc-marvel-4a0ef9962da2.json"
+
+# Configurações do MinIO
 AWS_S3_ENDPOINT = "minio-api-minio.apps.rosa.poc-ai.9ewf.p3.openshiftapps.com"
 AWS_ACCESS_KEY_ID = ""
 AWS_SECRET_ACCESS_KEY = ""
 AWS_S3_BUCKET = ""
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-
-# Create an HTTP client with timeouts
-http_client = urllib3.PoolManager(
-    timeout=urllib3.Timeout(connect=5.0, read=10.0)
-)
-
-# Initialize the MinIO client with the custom HTTP client
+# Criação do cliente MinIO
 client = Minio(
     AWS_S3_ENDPOINT,
     access_key=AWS_ACCESS_KEY_ID,
     secret_key=AWS_SECRET_ACCESS_KEY,
-    secure=True,
-    http_client=http_client
+    secure=True  # Configurado para HTTPS
 )
 
-# Check if the script received the file identifier as an environment variable
-file_identifier = os.getenv('file_identifier')
-#file_identifier = "joao"
+# Ensure the script receives the file identifier as an environment variable
+#file_identifier = os.getenv('file_identifier')
+file_identifier = "bernando"
 if not file_identifier:
     print("Error: file_identifier environment variable is not set.")
     sys.exit(1)
 else:
     print(f"file_identifier: {file_identifier}")
 
-# Download the PDF file from MinIO
+# Baixar o arquivo PDF do MinIO
 object_name = f"{file_identifier}.pdf"
 file_path = f"./{file_identifier}.pdf"
 output_pdf_path = f"./{file_identifier}_no_watermark.pdf"
@@ -84,7 +72,7 @@ except S3Error as e:
     print("Error occurred: ", e)
     sys.exit(1)
 
-# Function to remove the watermark from the PDF
+# Função para remover a marca d'água do PDF
 def remove_watermark_advanced(pdf_path, output_path):
     doc = fitz.open(pdf_path)
 
@@ -106,71 +94,68 @@ def remove_watermark_advanced(pdf_path, output_path):
     doc.save(output_path)
     print(f"Watermark removed: {output_path}")
 
-# Remove the watermark from the PDF
+# Remover a marca d'água do PDF
 remove_watermark_advanced(file_path, output_pdf_path)
 
-# New data extraction function
-def extract_text_new(pdf_path):
-    extracted_text = ''
-    if os.path.exists(pdf_path):
-        try:
-            paginas_imagens = convert_from_path(pdf_path)
-            for i, imagem_processada in enumerate(paginas_imagens):
-                print(f"Processing page {i+1} of the PDF...")
+# Função para extrair texto do PDF
+def extract_text_from_pdf(pdf_path):
+    doc = fitz.open(pdf_path)
+    text = ""
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        text += page.get_text()
+    return text
 
-                # Custom configuration for Tesseract OCR
-                ocr_config = r'-c preserve_interword_spaces=1 --oem 1 --psm 1'
-#                ocr_config = r'-c preserve_interword_spaces=1 --tessdata-dir /usr/share/tesseract/tessdata --oem 1 --psm 1'
-#
-                # Perform OCR
-                ocr_data = pytesseract.image_to_data(imagem_processada, lang='por', config=ocr_config, output_type=Output.DICT)
+# Função para realizar OCR no PDF usando Google Cloud Vision
+def ocr_extract_text_from_pdf_gcv(pdf_path):
+    try:
+        # Inicializar o cliente do Google Cloud Vision
+        client = vision.ImageAnnotatorClient()
 
-                # Convert data into a DataFrame for analysis
-                ocr_dataframe = pd.DataFrame(ocr_data)
+        # Abre o PDF com PyMuPDF
+        pdf_document = fitz.open(pdf_path)
+        text = ""
 
-                # Data cleaning: remove whitespaces and invalid texts
-                cleaned_df = ocr_dataframe[(ocr_dataframe.conf != '-1') & (ocr_dataframe.text != ' ') & (ocr_dataframe.text != '')]
+        for i in range(len(pdf_document)):
+            # Converte a página do PDF em uma imagem
+            page = pdf_document[i]
+            pix = page.get_pixmap()
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
-                # Sort text blocks vertically based on 'top' position
-                sorted_block_numbers = cleaned_df.groupby('block_num').first().sort_values('top').index.tolist()
+            # Converte a imagem para bytes
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='PNG')
+            img_byte_arr = img_byte_arr.getvalue()
 
-                for block_num in sorted_block_numbers:
-                    current_block = cleaned_df[cleaned_df['block_num'] == block_num]  # Filter data for the current block
-                    filtered_text = current_block[current_block.text.str.len() > 3]  # Select texts with more than 3 characters
-                    avg_char_width = (filtered_text.width / filtered_text.text.str.len()).mean()  # Calculate the average character width
-                    prev_paragraph, prev_line, prev_left_margin = 0, 0, 0  # Variables to control paragraphs, lines, and previous margins
+            # Converte para o formato de imagem utilizado pelo Google Vision
+            image = vision.Image(content=img_byte_arr)
 
-                    for idx, line_data in current_block.iterrows():
-                        # Change paragraph or line as needed
-                        if prev_paragraph != line_data['par_num']:
-                            extracted_text += '\n'
-                            prev_paragraph = line_data['par_num']
-                            prev_line = line_data['line_num']
-                            prev_left_margin = 0
-                        elif prev_line != line_data['line_num']:
-                            extracted_text += '\n'
-                            prev_line = line_data['line_num']
-                            prev_left_margin = 0
+            # Chama a API para realizar OCR
+            response = client.text_detection(image=image)
+            annotations = response.text_annotations
 
-                        # Calculate how many spaces to add for alignment
-                        spaces_to_add = 0
-                        if line_data['left'] / avg_char_width > prev_left_margin + 1:
-                            spaces_to_add = int((line_data['left']) / avg_char_width) - prev_left_margin
-                            extracted_text += ' ' * spaces_to_add  # Add necessary spaces to maintain alignment
-                        extracted_text += line_data['text'] + ' '  # Add the text of the current line
-                        prev_left_margin += len(line_data['text']) + spaces_to_add + 1  # Update the left margin for the next line
+            if annotations:
+                page_text = annotations[0].description
+                text += page_text + "\n"
+                print(f"Texto extraído da página {i + 1}: {page_text[:100]}...")  # Imprime os primeiros 100 caracteres
 
-                    extracted_text += '\n'  # Add a new line at the end of each block
+            if response.error.message:
+                raise Exception(f'{response.error.message}')
 
-            return extracted_text
-        except Exception as e:
-            print(f"Error processing the PDF: {e}")
-            return ''
-    else:
-        print(f"The file {pdf_path} was not found.")
-        return ''
+        return text
+    except Exception as e:
+        print(f"Erro ao tentar realizar OCR no arquivo {pdf_path}: {e}")
+        return ""
 
-# Function to extract the contributor's name
+# Função para tentar extrair texto e fallback para OCR se necessário
+def extract_text_with_fallback(pdf_path):
+    text = extract_text_from_pdf(pdf_path)
+    if not text.strip():
+        print("Texto não encontrado com fitz. Iniciando OCR...")
+        text = ocr_extract_text_from_pdf_gcv(pdf_path)
+    return text
+
+# Função para extrair nome do contribuinte
 def extract_contributor_name(text):
     patterns = [
         r'NOME:\s*([A-Z\s]+)\s*CPF:',
@@ -178,7 +163,7 @@ def extract_contributor_name(text):
         r'Nome:\s*([A-Z\s]+)\s*Data de Nascimento:',
         r'Declarante:\s*([A-Z\s]+)\s*CPF:',
         r'Contribuinte:\s*([A-Z\s]+)\s*CPF:',
-        r'IDENTIFICAÇÃO DO CONTRIBUINTE\s*Nome:\s*([A-Z\s]+)'
+        r'Identificação do Contribuinte\s*([A-Z\s]+)\s*CPF:'
     ]
 
     for pattern in patterns:
@@ -188,41 +173,18 @@ def extract_contributor_name(text):
 
     return None
 
-# Function to convert Brazilian currency values to decimal
-def convert_brazilian_currency_to_decimal_only(text):
-    def replace_func(match):
-        value = match.group(0)
-        value = value.replace('.', '')
-        value = value.replace(',', '.')
-    text = re.sub(r'\b\d{1,3}(\.\d{3})*,\d{2}\b', replace_func, text)
-    return text
-
-# Function to extract group and code from the text
-def extract_group_code_from_pdf(text):
-    pattern = r'GRUPO\s*(\d{2})\s+.*\s+CÓDIGO\s*(\d{2})'
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match:
-        return match.group(1), match.group(2)
-    return None, None
-
-# Function to preprocess the extracted text
-def preprocess_text_with_group_code(text):
-    text = convert_brazilian_currency_to_decimal_only(text)
-    group, code = extract_group_code_from_pdf(text)
-    return text, group, code
-
-# Milvus configurations
+# Configurações do Milvus
 MILVUS_HOST = "vectordb-milvus.milvus.svc.cluster.local"
 MILVUS_PORT = 19530
-MILVUS_USERNAME = "root"
-MILVUS_PASSWORD = "Milvus"
-MILVUS_COLLECTION = "irpf"
+MILVUS_USERNAME = ""
+MILVUS_PASSWORD = ""
+MILVUS_COLLECTION = "safra_dir"
 
-# OpenAI configurations
+# Configurações do OpenAI
 OPENAI_API_KEY = ""
 openai.api_key = OPENAI_API_KEY
 
-# Initialize the embedding model
+# Inicialização do modelo de embedding
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 class EmbeddingFunctionWrapper:
@@ -237,11 +199,46 @@ class EmbeddingFunctionWrapper:
 
 embedding_function = EmbeddingFunctionWrapper(embedding_model)
 
-# Function to split the text
+# Extraindo texto do PDF (com fallback para OCR)
+text = extract_text_with_fallback(output_pdf_path)
+contributor_name = extract_contributor_name(text)
+
+# Verificação se o nome do contribuinte foi encontrado
+if not contributor_name:
+    print("Erro: Nome do contribuinte não encontrado. O script será encerrado.")
+    sys.exit(1)
+
+# Função para converter valores monetários brasileiros para decimal
+def convert_brazilian_currency_to_decimal_only(text):
+    def replace_func(match):
+        value = match.group(0)
+        value = value.replace('.', '')
+        value = value.replace(',', '.')
+        return value
+
+    text = re.sub(r'\b\d{1,3}(\.\d{3})*,\d{2}\b', replace_func, text)
+    return text
+
+# Função para extrair código e grupo do texto diretamente do PDF
+def extract_group_code_from_pdf(text):
+    pattern = r'GRUPO\s*(\d{2})\s+.*\s+CÓDIGO\s*(\d{2})'
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        return match.group(1), match.group(2)
+    return None, None
+
+# Função para preprocessar o texto extraído
+def preprocess_text_with_group_code(text):
+    text = convert_brazilian_currency_to_decimal_only(text)
+    group, code = extract_group_code_from_pdf(text)
+    return text, group, code
+
+# Função para dividir o texto
 def split_text(text, max_length=60000):
     words = text.split()
     parts = []
     current_part = []
+
     current_length = 0
     for word in words:
         if current_length + len(word) + 1 <= max_length:
@@ -251,49 +248,45 @@ def split_text(text, max_length=60000):
             parts.append(" ".join(current_part))
             current_part = [word]
             current_length = len(word) + 1
+
     if current_part:
         parts.append(" ".join(current_part))
+
     return parts
 
-# Function to store text parts in Milvus
+# Função para armazenar partes do texto no Milvus
 def store_text_parts_in_milvus(text_parts, pdf_file):
     for i, part in enumerate(text_parts):
         preprocessed_text, group, code = preprocess_text_with_group_code(part)
         metadata = {"source": pdf_file, "part": i, "group": group, "code": code}
         store.add_texts([preprocessed_text], metadatas=[metadata])
 
-# Initialize Milvus
+# Inicialização do Milvus
 store = Milvus(
     embedding_function=embedding_function,
-    connection_args={
-        "host": "vectordb-milvus.milvus.svc.cluster.local", 
-        "port": 19530,
-        "user": "root",
-        "password": "Milvus",
-        "timeout": 30  # Ajuste o timeout conforme necessário
-    },
-    collection_name="irpf",
+    connection_args={"host": MILVUS_HOST, "port": 19530, "user": MILVUS_USERNAME, "password": MILVUS_PASSWORD},
+    collection_name=MILVUS_COLLECTION,
     metadata_field="metadata",
     text_field="page_content",
     drop_old=False,
     auto_id=True
 )
 
+# Processamento do PDF
+pdf_folder_path = './'
+for pdf_file in os.listdir(pdf_folder_path):
+    if pdf_file.endswith('.pdf') and pdf_file == f"{file_identifier}_no_watermark.pdf":
+        pdf_path = os.path.join(pdf_folder_path, pdf_file)
+        text = extract_text_with_fallback(pdf_path)
+        contributor_name = extract_contributor_name(text)
+        if not contributor_name:
+            print("Erro: Nome do contribuinte não encontrado. O script será encerrado.")
+            sys.exit(1)
+        text_parts = split_text(text)
+        store_text_parts_in_milvus(text_parts, pdf_file)
 
-# Process the PDF
-pdf_path = output_pdf_path
-text = extract_text_new(pdf_path)
-contributor_name = extract_contributor_name(text)
+print("PDFs processed and stored in Milvus successfully.")
 
-# Check if the contributor's name was found
-if not contributor_name:
-    print("Error: Contributor's name not found. The script will exit.")
-    sys.exit(1)
-
-text_parts = split_text(text)
-store_text_parts_in_milvus(text_parts, os.path.basename(pdf_path))
-
-print("PDF processed and stored in Milvus successfully.")
 print(f"Contributor name: {contributor_name}")
 
 # Função para realizar a consulta no Milvus e gerar o XML
@@ -312,8 +305,8 @@ def query_information(query, contributor_name):
     context_combined = "\n".join(context_parts)
 
     response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        #temperature=0.3,  # Configuração para tornar a resposta mais determinística
+        model="gpt-4o-2024-08-06",
+        temperature=0.3,  # Configuração para tornar a resposta mais determinística
         messages=[
             {
                 "role": "system",
@@ -547,36 +540,42 @@ def query_information(query, contributor_name):
 
     return response['choices'][0]['message']['content']
 
-# Main function
+
+# Função principal
 def main():
-    query = f"Quais são todos os bens e direitos suas informações, seus atributos e detalhes, declarados por {contributor_name}? Não interrompa a resposta devido ao seu tamanho, forneça a resposta com todo o contexto que tiver. Valores monetarios devem estar em portugues do brasil, moeda real brl."
-    result = query_information(query, contributor_name)
+    if contributor_name:
+        text = extract_text_with_fallback(output_pdf_path)
+        query = f"Quais são todos os bens e direitos suas informações, seus atributos e detalhes, declarados por {contributor_name}?"
+        result = query_information(query, contributor_name)
 
-    # Remove code formatting if present
-    if result.startswith("```xml"):
-        result = result[6:]  # Remove "```xml" from the start
-    if result.endswith("```"):
-        result = result[:-3]  # Remove "```" from the end
+        # Remover formatação de código se existir
+        if result.startswith("```xml"):
+            result = result[6:]  # Remove "```xml" do início
+        if result.endswith("```"):
+            result = result[:-3]  # Remove "```" do final
 
-    # Remove unnecessary spaces at the ends
-    result = result.strip()
+        # Remove espaços desnecessários nas extremidades
+        result = result.strip()
 
-    file_name = f'./{file_identifier}.xml'
+        file_name = f'./{file_identifier}.xml'
 
-    with open(file_name, 'w', encoding='utf-8') as file:
-        file.write(result)
+        with open(file_name, 'w', encoding='utf-8') as file:
+            file.write(result)
 
-    print(f'File {file_name} has been successfully saved.')
+        print(f'File {file_name} has been successfully saved.')
 
-    # Upload the XML file to MinIO
-    object_name = f"{file_identifier}.xml"
-    bucket_name = 'irpf-xml'
-    try:
-        client.fput_object(bucket_name, object_name, file_name)
-        print(f"'{object_name}' is successfully uploaded as object to bucket '{bucket_name}'.")
-    except S3Error as e:
-        print("Error occurred: ", e)
+        # Upload do arquivo XML para o MinIO
+        file_path = f"./{file_identifier}.xml"
+        object_name = f"{file_identifier}.xml"
+        bucket_name = 'irpf-xml'
+        try:
+            client.fput_object(bucket_name, object_name, file_path)
+            print(f"'{object_name}' is successfully uploaded as object to bucket '{bucket_name}'.")
+        except S3Error as e:
+            print("Error occurred: ", e)
+    else:
+        print("Erro: Nome do contribuinte não encontrado. O script será encerrado.")
+        sys.exit(1)
 
-# Execute the main script
-if __name__ == "__main__":
-    main()
+# Executar o script principal
+main()
